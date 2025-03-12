@@ -4,8 +4,22 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'dart:io';
 import 'package:flutter/services.dart';
 
+// 전역 변수로 앱 상태 관리
+bool isAppInBackground = false;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // 앱 라이프사이클 상태 감지
+  SystemChannels.lifecycle.setMessageHandler((msg) async {
+    if (msg == AppLifecycleState.paused.toString()) {
+      isAppInBackground = true;
+    } else if (msg == AppLifecycleState.resumed.toString()) {
+      isAppInBackground = false;
+    }
+    return null;
+  });
+  
   runApp(const MyApp());
 }
 
@@ -34,11 +48,11 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   Position? _currentPosition;
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = 
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
-  
+
   // 내부 구역 좌표
   final List<Map<String, double>> boundaryPoints = [
     {'lat': 35.107760, 'lng': 129.079370}, // 좌상단
@@ -52,11 +66,49 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkAndRequestPermissions();
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 
-  // Hanho - 수정 필요
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      // 앱이 포그라운드로 돌아올 때 위치 추적 재시작
+      _checkAndRequestPermissions();
+    }
+  }
+
+  void _showErrorAndExit(String message) {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('오류'),
+          content: Text(message),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('확인'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                SystemNavigator.pop(); // 앱 종료
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _checkAndRequestPermissions() async {
     // 위치 서비스 활성화 확인
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -83,24 +135,26 @@ class _MyHomePageState extends State<MyHomePage> {
     // 알림 권한 요청
     if (Platform.isIOS) {
       final bool? result = await flutterLocalNotificationsPlugin
-          .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
+          .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin>()
           ?.requestPermissions(
-            alert: true,
-            badge: true,
-            sound: true,
-          );
+        alert: true,
+        badge: true,
+        sound: true,
+      );
       if (result != true) {
         _showErrorAndExit('알림 권한이 필요합니다.');
         return;
       }
     }
-    
+
     if (Platform.isAndroid) {
       final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
           flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
 
-      final bool? granted = await androidImplementation?.requestNotificationsPermission();
+      final bool? granted =
+          await androidImplementation?.requestNotificationsPermission();
       if (granted != true) {
         _showErrorAndExit('알림 권한이 필요합니다.');
         return;
@@ -112,29 +166,6 @@ class _MyHomePageState extends State<MyHomePage> {
     _startLocationTracking();
   }
 
-  // 권한설정 실패 시, 앱 종료
-  void _showErrorAndExit(String message) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('권한 오류'),
-          content: Text(message),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('확인'),
-              onPressed: () {
-                SystemNavigator.pop(); // 앱 종료
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  // 푸시 알림 채널 설정
   Future<void> _initializeNotifications() async {
     const androidChannel = AndroidNotificationChannel(
       'location_channel',
@@ -146,10 +177,11 @@ class _MyHomePageState extends State<MyHomePage> {
     );
 
     await flutterLocalNotificationsPlugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(androidChannel);
 
-    const initializationSettingsAndroid = 
+    const initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
     const initializationSettingsIOS = DarwinInitializationSettings(
       requestAlertPermission: true,
@@ -160,17 +192,14 @@ class _MyHomePageState extends State<MyHomePage> {
       android: initializationSettingsAndroid,
       iOS: initializationSettingsIOS,
     );
-    
+
     await flutterLocalNotificationsPlugin.initialize(
       initializationSettings,
-      onDidReceiveNotificationResponse: (NotificationResponse details) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const MyHomePage(title: '위치 기반 알림'),
-          ),
-          (route) => false,
-        );
+      onDidReceiveNotificationResponse: (NotificationResponse details) async {
+        if (isAppInBackground) {
+          // 앱이 백그라운드에 있었다면 위치 추적만 재시작
+          await _checkAndRequestPermissions();
+        }
       },
     );
   }
@@ -193,68 +222,27 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _startLocationTracking() async {
-    // 위치 서비스 활성화 확인
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       _showErrorAndExit('위치 서비스를 활성화해주세요.');
       return;
     }
+    _startLocationStream();
+  }
 
-    // 위치 권한 다시 확인
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission != LocationPermission.always) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: const Text('백그라운드 위치 권한 필요'),
-            content: const Text(
-              '이 앱은 백그라운드에서도 위치 정보가 필요합니다.\n'
-              '설정에서 위치 권한을 "항상 허용"으로 변경해주세요.'
-            ),
-            actions: <Widget>[
-              TextButton(
-                child: const Text('설정으로 이동'),
-                onPressed: () async {
-                  Navigator.of(context).pop(); // 다이얼로그 닫기
-                  await Geolocator.openAppSettings();
-                  // 설정에서 돌아왔을 때 권한 다시 체크
-                  if (mounted) {
-                    final newPermission = await Geolocator.checkPermission();
-                    if (newPermission == LocationPermission.always) {
-                      _startLocationTracking(); // 권한이 있으면 위치 추적 시작
-                    } else {
-                      _showErrorAndExit('백그라운드 위치 권한이 필요합니다.');
-                    }
-                  }
-                },
-              ),
-              TextButton(
-                child: const Text('종료'),
-                onPressed: () {
-                  SystemNavigator.pop(); // 앱 종료
-                },
-              ),
-            ],
-          );
-        },
-      );
-      return;
-    }
-
-    // 위치정보 업데이트 주기
+  void _startLocationStream() {
     const LocationSettings locationSettings = LocationSettings(
       accuracy: LocationAccuracy.high,
-      distanceFilter: 5, // m 이상 이동시 업데이트
+      distanceFilter: 5,
       timeLimit: null,
     );
 
-    Geolocator.getPositionStream(locationSettings: locationSettings).listen((Position position) {
+    Geolocator.getPositionStream(locationSettings: locationSettings)
+        .listen((Position position) {
       setState(() {
         _currentPosition = position;
       });
-      
+
       bool isCurrentlyInside = _isPointInPolygon(
         position.latitude,
         position.longitude,
@@ -263,7 +251,7 @@ class _MyHomePageState extends State<MyHomePage> {
       if (isCurrentlyInside && !_isInside) {
         _showNotification();
       }
-      
+
       setState(() {
         _isInside = isCurrentlyInside;
       });
@@ -334,9 +322,8 @@ class _MyHomePageState extends State<MyHomePage> {
               '지정된 구역 좌표:',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
-            ...boundaryPoints.map((point) => Text(
-              '위도: ${point['lat']}, 경도: ${point['lng']}'
-            )).toList(),
+            ...boundaryPoints.map((point) =>
+                Text('위도: ${point['lat']}, 경도: ${point['lng']}')).toList(),
           ],
         ),
       ),
