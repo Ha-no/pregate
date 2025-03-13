@@ -61,7 +61,7 @@ class GPSService {
       }
 
       currentPosition = position;
-      lastUpdateTime = DateTime.now();
+      lastUpdateTime = position.timestamp;
       
       bool isCurrentlyInside = _isPointInPolygon(
         position.latitude,

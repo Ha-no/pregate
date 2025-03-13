@@ -5,6 +5,8 @@ import 'dart:async';
 import 'permission/permission.dart';
 import 'gps/gps.dart';
 import 'utils/utils.dart';
+import 'log/log.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
@@ -40,11 +42,12 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   // Import 모듈
   late final Permission permission;
-  late final GPSService gpsService;  // GPS 서비스 추가
+  late final GPSService gpsService;
+  late final LogService logService;
 
   Position? _currentPosition; // 현재 위치 정보
   bool _isInside = false;     // 내부 진입 확인
-  double distance = 0;        // 현재 위치와 표준 지점 사이의 거리 
+  double distance = -1;        // 현재 위치와 표준 지점 사이의 거리 
   DateTime? _lastUpdateTime;  // 마지막 위치 업데이트 시간
   int _getGpsTime = 1000;     // 초기 GPS 업데이트 주기 (1초)
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -54,18 +57,35 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     
+    // 로그 서비스 초기화
+    logService = LogService();
+    
     // GPS 서비스 초기화
     gpsService = GPSService(
-      onPositionChanged: (position) => setState(() => _currentPosition = position),
+      onPositionChanged: (position) {
+        setState(() => _currentPosition = position);
+      },
       onInsideChanged: (inside) => setState(() => _isInside = inside),
-      onDistanceChanged: (dist) => setState(() => distance = dist),
+      onDistanceChanged: (dist) { 
+        setState(() => distance = dist);
+        if (distance != -1 && _currentPosition != null) {
+          logService.logGpsData(
+            position: _currentPosition!,
+            isInside: _isInside,
+            distance: distance,
+          );
+        }
+      },
       onTimeChanged: (time) => setState(() => _lastUpdateTime = time),
       onIntervalChanged: (interval) => setState(() => _getGpsTime = interval),
-      onEnterRegion: () => NotificationUtils.showNotification(),
+      onEnterRegion: () => NotificationUtils.showNotification(
+        title: '영역 진입',
+        body: '지정된 영역에 진입했습니다.',
+      ),
     );
     
     permission = Permission(
-      onPermissionGranted: _startLocationTracking,
+      onPermissionGranted: gpsService.startLocationTracking,
       onError: (message) => ErrorUtils.showErrorDialog(context, message),
       flutterLocalNotificationsPlugin: NotificationUtils.flutterLocalNotificationsPlugin,
     );
@@ -74,20 +94,8 @@ class _MyHomePageState extends State<MyHomePage> {
   
   @override
   void dispose() {
-    gpsService.dispose();  // GPS 서비스 정리
+    gpsService.dispose();
     super.dispose();
-  }
-
-  Future<void> _startLocationTracking() async {
-    try {
-      await gpsService.startLocationTracking();
-    } catch (e) {
-      ErrorUtils.showErrorDialog(context, '위치 서비스를 활성화해주세요.');
-    }
-  }
-
-  Future<void> _getCurrentPosition() async {
-    await gpsService.getCurrentPosition();
   }
 
   @override
@@ -128,11 +136,11 @@ class _MyHomePageState extends State<MyHomePage> {
             Text('정보 수집 시간 : ${_lastUpdateTime?.toString().substring(11, 19) ?? "없음"}'),
             Text('거리 정보 : ${distance.toStringAsFixed(1)}m'),
             Text('GPS 정보 수집 주기 : '
-                '${(_getGpsTime / 1000).toStringAsFixed(1)}s / '
+                '${(_getGpsTime / 3600000).toStringAsFixed(1)}h / '
                 '${(_getGpsTime / 60000).toStringAsFixed(1)}m / '
-                '${(_getGpsTime / 3600000).toStringAsFixed(1)}h'),
+                '${(_getGpsTime / 1000).toStringAsFixed(1)}s'),
             ElevatedButton(
-              onPressed: _getCurrentPosition,
+              onPressed: gpsService.getCurrentPosition,
               child: const Text('GPS 수동 업데이트'),
             ),
           ],
