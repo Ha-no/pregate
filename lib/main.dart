@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'dart:io';
-import 'package:flutter/services.dart';
+import 'dart:async';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +24,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
+// 앱 관련 변수
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
 
@@ -34,186 +34,112 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
+// 동작 관련 변수
 class _MyHomePageState extends State<MyHomePage> {
-  Position? _currentPosition;
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = 
+  Position? _currentPosition; // 현재 위치 정보
+  bool _isInside = false;     // 내부 진입 확인
+  double distance = 0;        // 현재 위치와 표준 지점 사이의 거리 
+  DateTime? _lastUpdateTime;  // 마지막 위치 업데이트 시간
+  Timer? _locationTimer;      // 위치 확인 타이머
+  int _getGpsTime = 1000;     // 초기 GPS 업데이트 주기 (1초)
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
-  
-  // 내부 구역 좌표
-  final List<Map<String, double>> boundaryPoints = [
-    {'lat': 35.107760, 'lng': 129.079370}, // 좌상단
-    {'lat': 35.107751, 'lng': 129.081279}, // 우상단
-    {'lat': 35.107495, 'lng': 129.079374}, // 좌하단
-    {'lat': 35.107479, 'lng': 129.081281}, // 우하단
-  ];
-
-  bool _isInside = false;
 
   @override
   void initState() {
     super.initState();
-    _checkAndRequestPermissions();
+    _initializeNotifications();
+    _requestLocationPermission();
   }
 
+  @override
+  void dispose() {
+    _locationTimer?.cancel();
+    super.dispose();
+  }
 
-  // Hanho - 수정 필요
-  Future<void> _checkAndRequestPermissions() async {
-    // 위치 서비스 활성화 확인
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      _showErrorAndExit('위치 서비스를 활성화해주세요.');
-      return;
-    }
+  Future<void> _initializeNotifications() async {
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const DarwinInitializationSettings initializationSettingsIOS =
+        DarwinInitializationSettings();
+    const InitializationSettings initializationSettings =
+        InitializationSettings(
+          android: initializationSettingsAndroid,
+          iOS: initializationSettingsIOS,
+        );
+    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+  }
 
-    // 위치 권한 확인 및 요청
+  Future<void> _requestLocationPermission() async {
     LocationPermission permission = await Geolocator.checkPermission();
+
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        _showErrorAndExit('위치 권한이 필요합니다.');
+        _showErrorAndExit('위치 권한이 거부되었습니다.');
         return;
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
-      _showErrorAndExit('설정에서 위치 권한을 허용해주세요.');
+      _showErrorAndExit('위치 권한이 영구적으로 거부되었습니다. 설정에서 권한을 허용해주세요.');
       return;
     }
 
-    // 알림 권한 요청
-    if (Platform.isIOS) {
-      final bool? result = await flutterLocalNotificationsPlugin
-          .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
-          ?.requestPermissions(
-            alert: true,
-            badge: true,
-            sound: true,
-          );
-      if (result != true) {
-        _showErrorAndExit('알림 권한이 필요합니다.');
-        return;
-      }
-    }
-    
-    if (Platform.isAndroid) {
-      final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
-          flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>();
-
-      final bool? granted = await androidImplementation?.requestNotificationsPermission();
-      if (granted != true) {
-        _showErrorAndExit('알림 권한이 필요합니다.');
-        return;
-      }
-    }
-
-    // 모든 권한이 허용되면 초기화 진행
-    await _initializeNotifications();
     _startLocationTracking();
   }
 
-  // 권한설정 실패 시, 앱 종료
-  void _showErrorAndExit(String message) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('권한 오류'),
-          content: Text(message),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('확인'),
-              onPressed: () {
-                SystemNavigator.pop(); // 앱 종료
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  // 푸시 알림 채널 설정
-  Future<void> _initializeNotifications() async {
-    const androidChannel = AndroidNotificationChannel(
-      'location_channel',
-      '위치 알림',
-      description: '위치 기반 알림을 위한 채널입니다.',
-      importance: Importance.max,
-      playSound: true,
-      enableVibration: true,
-    );
-
-    await flutterLocalNotificationsPlugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(androidChannel);
-
-    const initializationSettingsAndroid = 
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initializationSettingsIOS = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
-    const initializationSettings = InitializationSettings(
-      android: initializationSettingsAndroid,
-      iOS: initializationSettingsIOS,
-    );
-    
-    await flutterLocalNotificationsPlugin.initialize(
-      initializationSettings,
-      onDidReceiveNotificationResponse: (NotificationResponse details) {
-        if (Platform.isAndroid) {
-          // 안드로이드에서는 앱이 실행 중일 때만 네비게이터 사용
-          if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.detached) {
-            Navigator.of(context).popUntil((route) => route.isFirst);
-          }
-        } else {
-          // iOS에서는 앱이 백그라운드에 있을 때도 첫 화면으로 이동
-          Navigator.of(context).popUntil((route) => route.isFirst);
-        }
-      },
-    );
-  }
-
-  bool _isPointInPolygon(double lat, double lng) {
-    bool isInside = false;
-    int j = boundaryPoints.length - 1;
-
-    for (int i = 0; i < boundaryPoints.length; i++) {
-      if ((boundaryPoints[i]['lng']! < lng && boundaryPoints[j]['lng']! >= lng ||
-          boundaryPoints[j]['lng']! < lng && boundaryPoints[i]['lng']! >= lng) &&
-          (boundaryPoints[i]['lat']! + (lng - boundaryPoints[i]['lng']!) /
-              (boundaryPoints[j]['lng']! - boundaryPoints[i]['lng']!) *
-              (boundaryPoints[j]['lat']! - boundaryPoints[i]['lat']!) < lat)) {
-        isInside = !isInside;
-      }
-      j = i;
-    }
-    return isInside;
-  }
-
   Future<void> _startLocationTracking() async {
-    // 위치 서비스 활성화 확인
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       _showErrorAndExit('위치 서비스를 활성화해주세요.');
       return;
     }
 
-    // 위치정보 업데이트 주기
-    const LocationSettings locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 5, // m 이상 이동시 업데이트
-      timeLimit: null,
-    );
+    // 기존 타이머가 있다면 취소
+    _locationTimer?.cancel();
 
-    Geolocator.getPositionStream(locationSettings: locationSettings).listen((Position position) {
+    // _getGpsTime 간격으로 위치 확인
+    _locationTimer = Timer.periodic(Duration(milliseconds: _getGpsTime), (
+      timer,
+    ) {
+      _getCurrentPosition();
+    });
+  }
+
+  Future<void> _getCurrentPosition() async {
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+
+      // StandardPoint와의 거리 계산
+      distance = _calculateDistance(
+        position.latitude,
+        position.longitude,
+        StandardPoint['lat']!,
+        StandardPoint['lng']!
+      );
+
+      // 거리에 따른 새로운 GPS 업데이트 주기 계산
+      int newGpsTime = _calculateUpdateInterval(distance);
+      
+      // GPS 업데이트 주기가 변경되었다면 위치 추적을 재시작
+      if (newGpsTime != _getGpsTime) {
+        setState(() {
+          _getGpsTime = newGpsTime;
+        });
+        _startLocationTracking();
+      }
+
       setState(() {
         _currentPosition = position;
+        _lastUpdateTime = DateTime.now();
       });
-      
+
       bool isCurrentlyInside = _isPointInPolygon(
         position.latitude,
         position.longitude,
@@ -222,47 +148,98 @@ class _MyHomePageState extends State<MyHomePage> {
       if (isCurrentlyInside && !_isInside) {
         _showNotification();
       }
-      
+
       setState(() {
         _isInside = isCurrentlyInside;
       });
-    });
+    } catch (e) {
+      print('위치 획득 실패: $e');
+    }
   }
 
+  // 두 지점 사이의 거리 계산 함수 (m)
+  double _calculateDistance( double lat1, double lon1, double lat2, double lon2 ) {
+    return Geolocator.distanceBetween(lat1, lon1, lat2, lon2);
+  }
+
+  // 거리에 따른 GPS 업데이트 주기 계산 함수 (ms)
+  int _calculateUpdateInterval(double distance) {
+    for (var boundary in boundaryDistances) {
+      if (distance <= boundary['distance']!) {
+        return boundary['time']!.toInt();
+      }
+    }
+
+    return 3600000;
+  }
+
+  // Boundary 내부 진입 여부 확인 함수
+  bool _isPointInPolygon(double lat, double lng) {
+    int intersectCount = 0;
+    for (int i = 0; i < AreaPoint.length; i++) {
+      int j = (i + 1) % AreaPoint.length;
+
+      if ((AreaPoint[i]['lng']! <= lng && lng < AreaPoint[j]['lng']!) ||
+          (AreaPoint[j]['lng']! <= lng && lng < AreaPoint[i]['lng']!)) {
+        double intersectLat =
+            (AreaPoint[j]['lat']! - AreaPoint[i]['lat']!) *
+                (lng - AreaPoint[i]['lng']!) /
+                (AreaPoint[j]['lng']! - AreaPoint[i]['lng']!) +
+            AreaPoint[i]['lat']!;
+
+        if (lat < intersectLat) {
+          intersectCount++;
+        }
+      }
+    }
+    return intersectCount % 2 == 1;
+  }
+
+  // 알림 표시 함수
   Future<void> _showNotification() async {
-    const androidChannel = AndroidNotificationChannel(
-      'location_channel',
-      '위치 알림',
-      description: '위치 기반 알림을 위한 채널입니다.',
-      importance: Importance.max,
-      playSound: true,
-      enableVibration: true,
+    const AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails(
+          'location_channel',
+          '위치 알림',
+          channelDescription: '지정된 영역 진입 시 알림',
+          importance: Importance.max,
+          priority: Priority.high,
+        );
+    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+      android: androidPlatformChannelSpecifics,
     );
 
     await flutterLocalNotificationsPlugin.show(
       0,
-      '위치 알림',
-      '지정된 구역에 진입했습니다.',
-      NotificationDetails(
-        android: AndroidNotificationDetails(
-          androidChannel.id,
-          androidChannel.name,
-          channelDescription: androidChannel.description,
-          importance: androidChannel.importance,
-          priority: Priority.high,
-          playSound: androidChannel.playSound,
-          enableVibration: androidChannel.enableVibration,
-        ),
-        iOS: const DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: true,
-        ),
-      ),
+      '영역 진입',
+      '지정된 영역에 진입했습니다.',
+      platformChannelSpecifics,
     );
   }
 
-  @override
+  // 오류 메시지 표시 및 앱 종료 함수
+  void _showErrorAndExit(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('오류'),
+          content: Text(message),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('확인'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+    @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -293,12 +270,41 @@ class _MyHomePageState extends State<MyHomePage> {
               '지정된 구역 좌표:',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
-            ...boundaryPoints.map((point) => Text(
+            ...AreaPoint.map((point) => Text(
               '위도: ${point['lat']}, 경도: ${point['lng']}'
-            )).toList(),
+            )),
+            const SizedBox(height: 20),
+            Text('정보 수집 시간 : ${_lastUpdateTime?.toString().substring(11, 19)}'),
+            Text('거리 정보 : ${distance.toStringAsFixed(1)}m'),
+            Text('GPS 정보 수집 주기 : '
+                '${(_getGpsTime / 1000).toStringAsFixed(1)}s / '
+                '${(_getGpsTime / 60000).toStringAsFixed(1)}m / '
+                '${(_getGpsTime / 3600000).toStringAsFixed(1)}h'),
           ],
         ),
       ),
     );
   }
 }
+
+// 표준 지점 정의
+const Map<String, double> StandardPoint = {
+  'lat': 35.107770, // 예시 위도
+  'lng': 129.078880, // 예시 경도
+};
+
+// 다각형 꼭지점 정의
+const List<Map<String, double>> AreaPoint = [
+  {'lat': 35.107760, 'lng': 129.079370}, // 좌상단
+  {'lat': 35.107751, 'lng': 129.081279}, // 우상단
+  {'lat': 35.107495, 'lng': 129.079374}, // 좌하단
+  {'lat': 35.107479, 'lng': 129.081281}, // 우하단
+];
+
+// 위치 거리 기준 (m, ms)
+const List<Map<String, double>> boundaryDistances = [
+  {'distance': 200, 'time': 1000},      // 200m 이내 1초
+  {'distance': 3000, 'time': 60000},    // 3000m 이내 1분
+  {'distance': 20000, 'time': 600000},  // 20000m 이내 10분
+  {'distance': 50000, 'time': 1800000}, // 50000m 이내 30분
+];
