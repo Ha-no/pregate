@@ -86,7 +86,6 @@ class _MyHomePageState extends State<MyHomePage> {
       _showErrorAndExit('위치 권한이 영구적으로 거부되었습니다. 설정에서 권한을 허용해주세요.');
       return;
     }
-
     _startLocationTracking();
   }
 
@@ -96,14 +95,9 @@ class _MyHomePageState extends State<MyHomePage> {
       _showErrorAndExit('위치 서비스를 활성화해주세요.');
       return;
     }
-
-    // 기존 타이머가 있다면 취소
     _locationTimer?.cancel();
 
-    // _getGpsTime 간격으로 위치 확인
-    _locationTimer = Timer.periodic(Duration(milliseconds: _getGpsTime), (
-      timer,
-    ) {
+    _locationTimer = Timer.periodic(Duration(milliseconds: _getGpsTime), ( timer ) {
       _getCurrentPosition();
     });
   }
@@ -116,18 +110,15 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       );
 
-      // StandardPoint와의 거리 계산
-      distance = _calculateDistance(
+      distance = Geolocator.distanceBetween(
         position.latitude,
         position.longitude,
         StandardPoint['lat']!,
         StandardPoint['lng']!
       );
 
-      // 거리에 따른 새로운 GPS 업데이트 주기 계산
       int newGpsTime = _calculateUpdateInterval(distance);
-      
-      // GPS 업데이트 주기가 변경되었다면 위치 추적을 재시작
+
       if (newGpsTime != _getGpsTime) {
         setState(() {
           _getGpsTime = newGpsTime;
@@ -169,7 +160,6 @@ class _MyHomePageState extends State<MyHomePage> {
         return boundary['time']!.toInt();
       }
     }
-
     return 3600000;
   }
 
@@ -280,6 +270,10 @@ class _MyHomePageState extends State<MyHomePage> {
                 '${(_getGpsTime / 1000).toStringAsFixed(1)}s / '
                 '${(_getGpsTime / 60000).toStringAsFixed(1)}m / '
                 '${(_getGpsTime / 3600000).toStringAsFixed(1)}h'),
+            ElevatedButton(
+              onPressed: _getCurrentPosition,
+              child: const Text('GPS 수동 업데이트'),
+            ),
           ],
         ),
       ),
