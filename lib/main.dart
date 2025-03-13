@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'dart:async';
-
+import 'permission/permission.dart';
+import 'gps/gps.dart';
+import 'utils/utils.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
@@ -36,11 +38,14 @@ class MyHomePage extends StatefulWidget {
 
 // 동작 관련 변수
 class _MyHomePageState extends State<MyHomePage> {
+  // Import 모듈
+  late final Permission permission;
+  late final GPSService gpsService;  // GPS 서비스 추가
+
   Position? _currentPosition; // 현재 위치 정보
   bool _isInside = false;     // 내부 진입 확인
   double distance = 0;        // 현재 위치와 표준 지점 사이의 거리 
   DateTime? _lastUpdateTime;  // 마지막 위치 업데이트 시간
-  Timer? _locationTimer;      // 위치 확인 타이머
   int _getGpsTime = 1000;     // 초기 GPS 업데이트 주기 (1초)
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
@@ -48,188 +53,44 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    _initializeNotifications();
-    _requestLocationPermission();
+    
+    // GPS 서비스 초기화
+    gpsService = GPSService(
+      onPositionChanged: (position) => setState(() => _currentPosition = position),
+      onInsideChanged: (inside) => setState(() => _isInside = inside),
+      onDistanceChanged: (dist) => setState(() => distance = dist),
+      onTimeChanged: (time) => setState(() => _lastUpdateTime = time),
+      onIntervalChanged: (interval) => setState(() => _getGpsTime = interval),
+      onEnterRegion: () => NotificationUtils.showNotification(),
+    );
+    
+    permission = Permission(
+      onPermissionGranted: _startLocationTracking,
+      onError: (message) => ErrorUtils.showErrorDialog(context, message),
+      flutterLocalNotificationsPlugin: NotificationUtils.flutterLocalNotificationsPlugin,
+    );
+    permission.initializePermissions();
   }
-
+  
   @override
   void dispose() {
-    _locationTimer?.cancel();
+    gpsService.dispose();  // GPS 서비스 정리
     super.dispose();
   }
 
-  Future<void> _initializeNotifications() async {
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const DarwinInitializationSettings initializationSettingsIOS =
-        DarwinInitializationSettings();
-    const InitializationSettings initializationSettings =
-        InitializationSettings(
-          android: initializationSettingsAndroid,
-          iOS: initializationSettingsIOS,
-        );
-    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
-  }
-
-  Future<void> _requestLocationPermission() async {
-    LocationPermission permission = await Geolocator.checkPermission();
-
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        _showErrorAndExit('위치 권한이 거부되었습니다.');
-        return;
-      }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      _showErrorAndExit('위치 권한이 영구적으로 거부되었습니다. 설정에서 권한을 허용해주세요.');
-      return;
-    }
-    _startLocationTracking();
-  }
-
   Future<void> _startLocationTracking() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      _showErrorAndExit('위치 서비스를 활성화해주세요.');
-      return;
+    try {
+      await gpsService.startLocationTracking();
+    } catch (e) {
+      ErrorUtils.showErrorDialog(context, '위치 서비스를 활성화해주세요.');
     }
-    _locationTimer?.cancel();
-
-    _locationTimer = Timer.periodic(Duration(milliseconds: _getGpsTime), ( timer ) {
-      _getCurrentPosition();
-    });
   }
 
   Future<void> _getCurrentPosition() async {
-    try {
-      Position position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
-
-      distance = Geolocator.distanceBetween(
-        position.latitude,
-        position.longitude,
-        StandardPoint['lat']!,
-        StandardPoint['lng']!
-      );
-
-      int newGpsTime = _calculateUpdateInterval(distance);
-
-      if (newGpsTime != _getGpsTime) {
-        setState(() {
-          _getGpsTime = newGpsTime;
-        });
-        _startLocationTracking();
-      }
-
-      setState(() {
-        _currentPosition = position;
-        _lastUpdateTime = DateTime.now();
-      });
-
-      bool isCurrentlyInside = _isPointInPolygon(
-        position.latitude,
-        position.longitude,
-      );
-
-      if (isCurrentlyInside && !_isInside) {
-        _showNotification();
-      }
-
-      setState(() {
-        _isInside = isCurrentlyInside;
-      });
-    } catch (e) {
-      print('위치 획득 실패: $e');
-    }
+    await gpsService.getCurrentPosition();
   }
 
-  // 두 지점 사이의 거리 계산 함수 (m)
-  double _calculateDistance( double lat1, double lon1, double lat2, double lon2 ) {
-    return Geolocator.distanceBetween(lat1, lon1, lat2, lon2);
-  }
-
-  // 거리에 따른 GPS 업데이트 주기 계산 함수 (ms)
-  int _calculateUpdateInterval(double distance) {
-    for (var boundary in boundaryDistances) {
-      if (distance <= boundary['distance']!) {
-        return boundary['time']!.toInt();
-      }
-    }
-    return 3600000;
-  }
-
-  // Boundary 내부 진입 여부 확인 함수
-  bool _isPointInPolygon(double lat, double lng) {
-    int intersectCount = 0;
-    for (int i = 0; i < AreaPoint.length; i++) {
-      int j = (i + 1) % AreaPoint.length;
-
-      if ((AreaPoint[i]['lng']! <= lng && lng < AreaPoint[j]['lng']!) ||
-          (AreaPoint[j]['lng']! <= lng && lng < AreaPoint[i]['lng']!)) {
-        double intersectLat =
-            (AreaPoint[j]['lat']! - AreaPoint[i]['lat']!) *
-                (lng - AreaPoint[i]['lng']!) /
-                (AreaPoint[j]['lng']! - AreaPoint[i]['lng']!) +
-            AreaPoint[i]['lat']!;
-
-        if (lat < intersectLat) {
-          intersectCount++;
-        }
-      }
-    }
-    return intersectCount % 2 == 1;
-  }
-
-  // 알림 표시 함수
-  Future<void> _showNotification() async {
-    const AndroidNotificationDetails androidPlatformChannelSpecifics =
-        AndroidNotificationDetails(
-          'location_channel',
-          '위치 알림',
-          channelDescription: '지정된 영역 진입 시 알림',
-          importance: Importance.max,
-          priority: Priority.high,
-        );
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidPlatformChannelSpecifics,
-    );
-
-    await flutterLocalNotificationsPlugin.show(
-      0,
-      '영역 진입',
-      '지정된 영역에 진입했습니다.',
-      platformChannelSpecifics,
-    );
-  }
-
-  // 오류 메시지 표시 및 앱 종료 함수
-  void _showErrorAndExit(String message) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('오류'),
-          content: Text(message),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('확인'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-    @override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -264,7 +125,7 @@ class _MyHomePageState extends State<MyHomePage> {
               '위도: ${point['lat']}, 경도: ${point['lng']}'
             )),
             const SizedBox(height: 20),
-            Text('정보 수집 시간 : ${_lastUpdateTime?.toString().substring(11, 19)}'),
+            Text('정보 수집 시간 : ${_lastUpdateTime?.toString().substring(11, 19) ?? "없음"}'),
             Text('거리 정보 : ${distance.toStringAsFixed(1)}m'),
             Text('GPS 정보 수집 주기 : '
                 '${(_getGpsTime / 1000).toStringAsFixed(1)}s / '
@@ -280,25 +141,3 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 }
-
-// 표준 지점 정의
-const Map<String, double> StandardPoint = {
-  'lat': 35.107770, // 예시 위도
-  'lng': 129.078880, // 예시 경도
-};
-
-// 다각형 꼭지점 정의
-const List<Map<String, double>> AreaPoint = [
-  {'lat': 35.107760, 'lng': 129.079370}, // 좌상단
-  {'lat': 35.107751, 'lng': 129.081279}, // 우상단
-  {'lat': 35.107495, 'lng': 129.079374}, // 좌하단
-  {'lat': 35.107479, 'lng': 129.081281}, // 우하단
-];
-
-// 위치 거리 기준 (m, ms)
-const List<Map<String, double>> boundaryDistances = [
-  {'distance': 200, 'time': 1000},      // 200m 이내 1초
-  {'distance': 3000, 'time': 60000},    // 3000m 이내 1분
-  {'distance': 20000, 'time': 600000},  // 20000m 이내 10분
-  {'distance': 50000, 'time': 1800000}, // 50000m 이내 30분
-];
