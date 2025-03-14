@@ -16,6 +16,7 @@ class GPSService {
   final Function(DateTime?) onTimeChanged;
   final Function(int) onIntervalChanged;
   final Function() onEnterRegion;
+  StreamSubscription<Position>? positionStream;
 
   GPSService({
     required this.onPositionChanged,
@@ -31,10 +32,24 @@ class GPSService {
     if (!serviceEnabled) {
       throw Exception('위치 서비스가 비활성화되어 있습니다.');
     }
+
+    // 기존 스트림과 타이머 취소
+    await positionStream?.cancel();
     locationTimer?.cancel();
 
-    locationTimer = Timer.periodic(
-        Duration(milliseconds: getGpsTime), (timer) => getCurrentPosition());
+    // 위치 스트림 설정
+    positionStream = Geolocator.getPositionStream(
+      locationSettings: AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        intervalDuration: Duration(milliseconds: getGpsTime), // Android용 위치 업데이트 간격
+      ),
+    ).listen((Position position) {
+      // 위치 업데이트 처리
+      _handlePosition(position);
+    });
+
+    // 초기 위치 가져오기
+    getCurrentPosition();
   }
 
   Future<void> getCurrentPosition() async {
@@ -45,11 +60,25 @@ class GPSService {
         ),
       );
 
+      // 현재 시간으로 타임스탬프 업데이트
+      final updatedPosition = Position(
+        longitude: position.longitude,
+        latitude: position.latitude,
+        timestamp: position.timestamp,  // 현재 시간으로 설정
+        accuracy: position.accuracy,
+        altitude: position.altitude,
+        altitudeAccuracy: position.altitudeAccuracy,
+        heading: position.heading,
+        headingAccuracy: position.headingAccuracy,
+        speed: position.speed,
+        speedAccuracy: position.speedAccuracy,
+      );
+
       distance = _calculateDistance(
-        position.latitude,
-        position.longitude,
-        StandardPoint['lat']!,
-        StandardPoint['lng']!,
+        updatedPosition.latitude,
+        updatedPosition.longitude,
+        standardPoint['lat']!,
+        standardPoint['lng']!,
       );
 
       int newGpsTime = _calculateUpdateInterval(distance);
@@ -60,12 +89,11 @@ class GPSService {
         startLocationTracking();
       }
 
-      currentPosition = position;
-      lastUpdateTime = position.timestamp;
+      currentPosition = updatedPosition;
       
       bool isCurrentlyInside = _isPointInPolygon(
-        position.latitude,
-        position.longitude,
+        updatedPosition.latitude,
+        updatedPosition.longitude,
       );
 
       if (isCurrentlyInside && !isInside) {
@@ -75,12 +103,13 @@ class GPSService {
       isInside = isCurrentlyInside;
       if (isCurrentlyInside && !isInside) {
         NotificationUtils.showNotification(
-      title: '영역 진입 알림', 
-      body: '지정된 영역에 진입했습니다. 현재 시간: ${lastUpdateTime?.toString().substring(11, 19)}',);
+          title: '영역 진입 알림', 
+          body: '지정된 영역에 진입했습니다. 현재 시간: ${lastUpdateTime?.toString().substring(11, 19)}',
+        );
       }
       
       // 콜백 실행
-      onPositionChanged(position);
+      onPositionChanged(updatedPosition);
       onInsideChanged(isInside);
       onDistanceChanged(distance);
       onTimeChanged(lastUpdateTime);
@@ -89,7 +118,49 @@ class GPSService {
     }
   }
 
+  void _handlePosition(Position position) {
+
+    print('타임 스탬프 : ${position.timestamp}');
+    print('getGpsTime : $getGpsTime');
+
+    distance = _calculateDistance(
+      position.latitude,
+      position.longitude,
+      standardPoint['lat']!,
+      standardPoint['lng']!,
+    );
+
+    int newGpsTime = _calculateUpdateInterval(distance);
+    if (newGpsTime != getGpsTime) {
+      getGpsTime = newGpsTime;
+      onIntervalChanged(newGpsTime);
+      // 간격이 변경되면 스트림 재시작
+      startLocationTracking();
+    }
+
+    currentPosition = position;
+    lastUpdateTime = position.timestamp;
+    
+    bool isCurrentlyInside = _isPointInPolygon(
+      position.latitude,
+      position.longitude,
+    );
+
+    if (isCurrentlyInside && !isInside) {
+      onEnterRegion();
+    }
+
+    isInside = isCurrentlyInside;
+    
+    // 콜백 실행
+    onPositionChanged(position);
+    onInsideChanged(isInside);
+    onDistanceChanged(distance);
+    onTimeChanged(lastUpdateTime);
+  }
+
   double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
+    print("거리계산");
     return Geolocator.distanceBetween(lat1, lon1, lat2, lon2);
   }
 
@@ -103,26 +174,29 @@ class GPSService {
   }
 
   bool _isPointInPolygon(double lat, double lng) {
-    double minLat = AreaPoint.map((p) => p['lat']!).reduce(min);
-    double maxLat = AreaPoint.map((p) => p['lat']!).reduce(max);
-    double minLng = AreaPoint.map((p) => p['lng']!).reduce(min);
-    double maxLng = AreaPoint.map((p) => p['lng']!).reduce(max);
+    print("내부 영역 계산");
+    double minLat = areaPoint.map((p) => p['lat']!).reduce(min);
+    double maxLat = areaPoint.map((p) => p['lat']!).reduce(max);
+    double minLng = areaPoint.map((p) => p['lng']!).reduce(min);
+    double maxLng = areaPoint.map((p) => p['lng']!).reduce(max);
 
     return lat >= minLat && lat <= maxLat && lng >= minLng && lng <= maxLng;
   }
 
+  @override
   void dispose() {
+    positionStream?.cancel();
     locationTimer?.cancel();
   }
 }
 
 // 상수 정의
-const Map<String, double> StandardPoint = {
+const Map<String, double> standardPoint = {
   'lat': 35.107770,
   'lng': 129.078880,
 };
 
-const List<Map<String, double>> AreaPoint = [
+const List<Map<String, double>> areaPoint = [
   {'lat': 35.107760, 'lng': 129.079370},
   {'lat': 35.107751, 'lng': 129.081279},
   {'lat': 35.107495, 'lng': 129.079374},

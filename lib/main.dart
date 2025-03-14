@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'dart:async';
 import 'permission/permission.dart';
 import 'gps/gps.dart';
 import 'utils/utils.dart';
@@ -129,16 +128,16 @@ class _MyHomePageState extends State<MyHomePage> {
               '지정된 구역 좌표:',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
-            ...AreaPoint.map((point) => Text(
+            ...areaPoint.map((point) => Text(
               '위도: ${point['lat']}, 경도: ${point['lng']}'
             )),
             const SizedBox(height: 20),
             Text('정보 수집 시간 : ${_lastUpdateTime?.toString().substring(11, 19) ?? "없음"}'),
             Text('거리 정보 : ${distance.toStringAsFixed(1)}m'),
             Text('GPS 정보 수집 주기 : '
-                '${(_getGpsTime / 3600000).toStringAsFixed(1)}h / '
-                '${(_getGpsTime / 60000).toStringAsFixed(1)}m / '
-                '${(_getGpsTime / 1000).toStringAsFixed(1)}s'),
+                '${(_getGpsTime / 3600000).toInt()}h : '
+                '${((_getGpsTime % 3600000) / 60000).toInt()}m : '
+                '${(((_getGpsTime % 3600000) % 60000) / 1000).toInt()}s'),
             ElevatedButton(
               onPressed: gpsService.getCurrentPosition,
               child: const Text('GPS 수동 업데이트'),

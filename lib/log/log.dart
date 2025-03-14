@@ -63,7 +63,6 @@ Future<bool> checkStoragePermission() async {
               await documentsDir.create(recursive: true);
             }
             
-            print('외부 저장소 경로: $documentsPath');
             return documentsPath;
           }
         }
@@ -120,8 +119,6 @@ Future<bool> checkStoragePermission() async {
       }
         
       final file = await _getLogFile();
-      final now = DateTime.now();
-      final timeFormatter = DateFormat('HH:mm:ss');
       
       // JSON 형식으로 로그 데이터 구성
       final Map<String, dynamic> logData = {
