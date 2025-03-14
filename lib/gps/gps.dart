@@ -15,8 +15,10 @@ class GPSService {
   final Function(double) onDistanceChanged;
   final Function(DateTime?) onTimeChanged;
   final Function(int) onIntervalChanged;
-  final Function() onEnterRegion;
   StreamSubscription<Position>? positionStream;
+  
+  // 위치 정보 처리 중복 방지를 위한 변수 추가
+  DateTime? _lastProcessedTimestamp;
 
   GPSService({
     required this.onPositionChanged,
@@ -24,7 +26,6 @@ class GPSService {
     required this.onDistanceChanged,
     required this.onTimeChanged,
     required this.onIntervalChanged,
-    required this.onEnterRegion,
   });
 
   Future<void> startLocationTracking() async {
@@ -41,14 +42,12 @@ class GPSService {
     positionStream = Geolocator.getPositionStream(
       locationSettings: AndroidSettings(
         accuracy: LocationAccuracy.high,
-        intervalDuration: Duration(milliseconds: getGpsTime), // Android용 위치 업데이트 간격
+        intervalDuration: Duration(milliseconds: getGpsTime),
       ),
     ).listen((Position position) {
-      // 위치 업데이트 처리
       _handlePosition(position);
     });
 
-    // 초기 위치 가져오기
     getCurrentPosition();
   }
 
@@ -60,11 +59,10 @@ class GPSService {
         ),
       );
 
-      // 현재 시간으로 타임스탬프 업데이트
       final updatedPosition = Position(
         longitude: position.longitude,
         latitude: position.latitude,
-        timestamp: position.timestamp,  // 현재 시간으로 설정
+        timestamp: position.timestamp,
         accuracy: position.accuracy,
         altitude: position.altitude,
         altitudeAccuracy: position.altitudeAccuracy,
@@ -74,55 +72,32 @@ class GPSService {
         speedAccuracy: position.speedAccuracy,
       );
 
-      distance = _calculateDistance(
-        updatedPosition.latitude,
-        updatedPosition.longitude,
-        standardPoint['lat']!,
-        standardPoint['lng']!,
-      );
-
-      int newGpsTime = _calculateUpdateInterval(distance);
-
-      if (newGpsTime != getGpsTime) {
-        getGpsTime = newGpsTime;
-        onIntervalChanged(newGpsTime);
-        startLocationTracking();
-      }
-
-      currentPosition = updatedPosition;
-      
-      bool isCurrentlyInside = _isPointInPolygon(
-        updatedPosition.latitude,
-        updatedPosition.longitude,
-      );
-
-      if (isCurrentlyInside && !isInside) {
-        onEnterRegion();
-      }
-
-      isInside = isCurrentlyInside;
-      if (isCurrentlyInside && !isInside) {
-        NotificationUtils.showNotification(
-          title: '영역 진입 알림', 
-          body: '지정된 영역에 진입했습니다. 현재 시간: ${lastUpdateTime?.toString().substring(11, 19)}',
-        );
-      }
-      
-      // 콜백 실행
-      onPositionChanged(updatedPosition);
-      onInsideChanged(isInside);
-      onDistanceChanged(distance);
-      onTimeChanged(lastUpdateTime);
+      // 위치 정보 처리는 _handlePosition 메서드로 통합
+      _handlePosition(updatedPosition);
     } catch (e) {
       print('위치 획득 실패: $e');
     }
   }
 
   void _handlePosition(Position position) {
-
     print('타임 스탬프 : ${position.timestamp}');
     print('getGpsTime : $getGpsTime');
+    
+    // 이미 처리된 위치 정보인지 확인
+    if (_lastProcessedTimestamp != null && 
+        _lastProcessedTimestamp == position.timestamp) {
+      print('이미 처리된 위치 정보입니다. 건너뜁니다.');
+      return;
+    }
+    
+    // 현재 처리 중인 타임스탬프 저장
+    _lastProcessedTimestamp = position.timestamp;
 
+    // 현재 위치 업데이트
+    currentPosition = position;
+    lastUpdateTime = position.timestamp;
+
+    // 거리 계산 (한 번만 실행)
     distance = _calculateDistance(
       position.latitude,
       position.longitude,
@@ -130,29 +105,32 @@ class GPSService {
       standardPoint['lng']!,
     );
 
-    int newGpsTime = _calculateUpdateInterval(distance);
-    if (newGpsTime != getGpsTime) {
-      getGpsTime = newGpsTime;
-      onIntervalChanged(newGpsTime);
-      // 간격이 변경되면 스트림 재시작
-      startLocationTracking();
-    }
-
-    currentPosition = position;
-    lastUpdateTime = position.timestamp;
-    
+    // 내부 영역 계산 (한 번만 실행)
     bool isCurrentlyInside = _isPointInPolygon(
       position.latitude,
       position.longitude,
     );
 
+    // 영역 진입 알림 처리
     if (isCurrentlyInside && !isInside) {
-      onEnterRegion();
+      NotificationUtils.showNotification(
+        title: '영역 진입 알림', 
+        body: '지정된 영역에 진입했습니다. 현재 시간: ${lastUpdateTime?.toString().substring(11, 19)}',
+      );
     }
-
+    
     isInside = isCurrentlyInside;
     
-    // 콜백 실행
+    // 업데이트 주기 계산 및 변경 (필요한 경우에만 스트림 재시작)
+    int newGpsTime = _calculateUpdateInterval(distance);
+    if (newGpsTime != getGpsTime) {
+      getGpsTime = newGpsTime;
+      onIntervalChanged(newGpsTime);
+      // 비동기 실행으로 변경하여 현재 메서드 완료 후 실행되도록 함
+      Future.microtask(() => startLocationTracking());
+    }
+    
+    // 상태 업데이트는 마지막에 한 번만 실행
     onPositionChanged(position);
     onInsideChanged(isInside);
     onDistanceChanged(distance);
@@ -183,7 +161,6 @@ class GPSService {
     return lat >= minLat && lat <= maxLat && lng >= minLng && lng <= maxLng;
   }
 
-  @override
   void dispose() {
     positionStream?.cancel();
     locationTimer?.cancel();

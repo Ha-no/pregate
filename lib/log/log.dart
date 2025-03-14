@@ -8,32 +8,35 @@ import 'package:geolocator/geolocator.dart';
 class LogService {
   static final LogService _instance = LogService._internal();
   
+  // 마지막으로 로그를 기록한 위치 정보의 타임스탬프
+  DateTime? _lastLoggedTimestamp;
+  
   factory LogService() {
     return _instance;
   }
   
   LogService._internal();
   
-Future<bool> checkStoragePermission() async {
-  // 안드로이드 13 이상에서는 다른 권한 체계 사용
-  if (Platform.isAndroid) {
-    // Android 13 (API 33) 이상
-    if (await Permission.manageExternalStorage.isGranted) {
-      return true;
+  Future<bool> checkStoragePermission() async {
+    // 안드로이드 13 이상에서는 다른 권한 체계 사용
+    if (Platform.isAndroid) {
+      // Android 13 (API 33) 이상
+      if (await Permission.manageExternalStorage.isGranted) {
+        return true;
+      }
+      
+      // 권한 요청 - 더 강력한 권한 먼저 시도
+      var status = await Permission.manageExternalStorage.request();
+      if (status.isGranted) {
+        return true;
+      }
+      
+      // 기본 저장소 권한 시도
+      status = await Permission.storage.request();
+      return status.isGranted;
     }
-    
-    // 권한 요청 - 더 강력한 권한 먼저 시도
-    var status = await Permission.manageExternalStorage.request();
-    if (status.isGranted) {
-      return true;
-    }
-    
-    // 기본 저장소 권한 시도
-    status = await Permission.storage.request();
-    return status.isGranted;
+    return true;
   }
-  return true;
-}
   
   Future<String> get _documentsPath async {
     // 안드로이드에서 외부 저장소 경로 가져오기
@@ -103,7 +106,6 @@ Future<bool> checkStoragePermission() async {
     
     return File('${logDir.path}/$fileName');
   }
-
   
   Future<void> logGpsData({
     required Position position,
@@ -111,6 +113,16 @@ Future<bool> checkStoragePermission() async {
     required double distance,
   }) async {
     try {
+      // 중복 로그 방지: 같은 타임스탬프의 위치 정보는 한 번만 기록
+      if (_lastLoggedTimestamp != null && 
+          _lastLoggedTimestamp == position.timestamp) {
+        print('이미 로그된 위치 정보입니다. 로그 기록을 건너뜁니다.');
+        return;
+      }
+      
+      // 현재 로그 중인 타임스탬프 저장
+      _lastLoggedTimestamp = position.timestamp;
+      
       // 저장소 권한 확인
       final hasPermission = await checkStoragePermission();
       if (!hasPermission) {
@@ -122,24 +134,24 @@ Future<bool> checkStoragePermission() async {
       
       // JSON 형식으로 로그 데이터 구성
       final Map<String, dynamic> logData = {
-        '시간': position.timestamp.toString().substring(0, 19),
-        '위도': position.latitude,
-        '경도': position.longitude,
-        '내부진입여부': isInside ? "내부" : "외부",
-        '거리': distance.toStringAsFixed(2) + 'm',
+        'Time': position.timestamp.toString().substring(0, 19),
+        'Latitude': position.latitude.toStringAsFixed(6),
+        'Longitude': position.longitude.toStringAsFixed(6),
+        'Inside': isInside ? "1" : "0", // 1 : 내부, 0 : 외부
+        'Distance': '${distance.toStringAsFixed(1)}m',
         'accuracy': position.accuracy,
         'altitude': position.altitude,
         'altitudeAccuracy': position.altitudeAccuracy,
-        'heading': position.heading,
+        'heading': position.heading.toStringAsFixed(2),
         'headingAccuracy': position.headingAccuracy,
-        'speed': position.speed,
+        'speed': position.speed.toStringAsFixed(2),
         'speedAccuracy': position.speedAccuracy,
       };
 
       String jsonLog = json.encode(logData);
       await file.writeAsString('$jsonLog\n', mode: FileMode.append);
       
-      print('GPS 로그가 JSON 형식으로 저장되었습니다: ${file.path}');
+      print('GPS 로그가 저장되었습니다: ${file.path}');
     } catch (e) {
       print('GPS 로그 저장 중 오류 발생: $e');
       print('오류 상세: ${e.toString()}');

@@ -77,10 +77,6 @@ class _MyHomePageState extends State<MyHomePage> {
       },
       onTimeChanged: (time) => setState(() => _lastUpdateTime = time),
       onIntervalChanged: (interval) => setState(() => _getGpsTime = interval),
-      onEnterRegion: () => NotificationUtils.showNotification(
-        title: '영역 진입',
-        body: '지정된 영역에 진입했습니다.',
-      ),
     );
     
     permission = Permission(
@@ -133,11 +129,12 @@ class _MyHomePageState extends State<MyHomePage> {
             )),
             const SizedBox(height: 20),
             Text('정보 수집 시간 : ${_lastUpdateTime?.toString().substring(11, 19) ?? "없음"}'),
-            Text('거리 정보 : ${distance.toStringAsFixed(1)}m'),
+            Text('기준점과의 거리 : ${distance.toStringAsFixed(1)}m'),
             Text('GPS 정보 수집 주기 : '
                 '${(_getGpsTime / 3600000).toInt()}h : '
                 '${((_getGpsTime % 3600000) / 60000).toInt()}m : '
                 '${(((_getGpsTime % 3600000) % 60000) / 1000).toInt()}s'),
+            const SizedBox(height: 10),
             ElevatedButton(
               onPressed: gpsService.getCurrentPosition,
               child: const Text('GPS 수동 업데이트'),
