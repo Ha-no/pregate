@@ -137,14 +137,14 @@ class _MyHomePageState extends State<MyHomePage> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
-                    '지정된 구역 좌표:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  ...areaPoint.map((point) => Text(
-                    '위도: ${point['lat']}, 경도: ${point['lng']}'
-                  )),
-                  const SizedBox(height: 20),
+                  // const Text(
+                  //   '지정된 구역 좌표:',
+                  //   style: TextStyle(fontWeight: FontWeight.bold),
+                  // ),
+                  // ...areaPoint.map((point) => Text(
+                  //   '위도: ${point['lat']}, 경도: ${point['lng']}'
+                  // )),
+                  // const SizedBox(height: 20),
                   Text('정보 수집 시간 : ${_lastUpdateTime?.toString().substring(11, 19) ?? "없음"}'),
                   Text('기준점과의 거리 : ${distance.toStringAsFixed(1)}m'),
                   Text('GPS 정보 수집 주기 : '
@@ -155,7 +155,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   ElevatedButton(
                     onPressed: gpsService.getCurrentPosition,
                     child: const Text('GPS 수동 업데이트'),
-                  ),
+                  ),                  
                 ],
               ),
             ),

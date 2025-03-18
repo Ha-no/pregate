@@ -1,6 +1,7 @@
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
 import 'dart:math';
+import 'dart:io';
 import '../utils/utils.dart';
 
 class GPSService {
@@ -17,8 +18,6 @@ class GPSService {
   final Function(int) onIntervalChanged;
   StreamSubscription<Position>? positionStream;
   
-  // 위치 정보 처리 중복 방지를 위한 변수 추가
-  DateTime? _lastProcessedTimestamp;
 
   GPSService({
     required this.onPositionChanged,
@@ -38,12 +37,29 @@ class GPSService {
     await positionStream?.cancel();
     locationTimer?.cancel();
 
-    // 위치 스트림 설정
-    positionStream = Geolocator.getPositionStream(
-      locationSettings: AndroidSettings(
+    // Android 12 호환 위치 설정
+    LocationSettings locationSettings;
+    if (Platform.isAndroid) {
+      locationSettings = AndroidSettings(
         accuracy: LocationAccuracy.high,
         intervalDuration: Duration(milliseconds: getGpsTime),
-      ),
+        // Android 12에서는 포그라운드 서비스 알림 설정 필요
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: '위치 추적 중',
+          notificationText: '앱이 백그라운드에서 위치를 추적하고 있습니다.',
+          enableWakeLock: true,
+        ),
+      );
+    } else {
+      locationSettings = const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 0,
+      );
+    }
+
+    // 위치 스트림 설정
+    positionStream = Geolocator.getPositionStream(
+      locationSettings: locationSettings,
     ).listen((Position position) {
       _handlePosition(position);
     });
@@ -54,9 +70,8 @@ class GPSService {
   Future<void> getCurrentPosition() async {
     try {
       Position position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 5),
       );
 
       final updatedPosition = Position(
@@ -82,16 +97,6 @@ class GPSService {
   void _handlePosition(Position position) {
     print('타임 스탬프 : ${position.timestamp}');
     print('getGpsTime : $getGpsTime');
-    
-    // 이미 처리된 위치 정보인지 확인
-    if (_lastProcessedTimestamp != null && 
-        _lastProcessedTimestamp == position.timestamp) {
-      print('이미 처리된 위치 정보입니다. 건너뜁니다.');
-      return;
-    }
-    
-    // 현재 처리 중인 타임스탬프 저장
-    _lastProcessedTimestamp = position.timestamp;
 
     // 현재 위치 업데이트
     currentPosition = position;

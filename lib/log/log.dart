@@ -1,110 +1,122 @@
+import 'dart:convert';
 import 'dart:io';
-import 'dart:convert';  // json을 위해 추가
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:intl/intl.dart';
-import 'package:geolocator/geolocator.dart';
 
 class LogService {
   static final LogService _instance = LogService._internal();
-  
-  // 마지막으로 로그를 기록한 위치 정보의 타임스탬프
-  DateTime? _lastLoggedTimestamp;
-  
-  factory LogService() {
-    return _instance;
-  }
-  
+  factory LogService() => _instance;
   LogService._internal();
-  
-  Future<bool> checkStoragePermission() async {
-    // 안드로이드 13 이상에서는 다른 권한 체계 사용
-    if (Platform.isAndroid) {
-      // Android 13 (API 33) 이상
-      if (await Permission.manageExternalStorage.isGranted) {
-        return true;
-      }
-      
-      // 권한 요청 - 더 강력한 권한 먼저 시도
-      var status = await Permission.manageExternalStorage.request();
-      if (status.isGranted) {
-        return true;
-      }
-      
-      // 기본 저장소 권한 시도
-      status = await Permission.storage.request();
-      return status.isGranted;
-    }
-    return true;
-  }
-  
-  Future<String> get _documentsPath async {
-    // 안드로이드에서 외부 저장소 경로 가져오기
+
+  DateTime? _lastLoggedTimestamp;
+  int? _androidSdkVersion;
+
+  // 안드로이드 SDK 버전 가져오기
+  Future<int> get androidSdkVersion async {
+    if (_androidSdkVersion != null) return _androidSdkVersion!;
+    
     if (Platform.isAndroid) {
       try {
-        // 외부 저장소 루트 경로 직접 접근 시도
-        Directory? externalDir;
-        
-        // 여러 경로 시도
-        final List<Directory?> externalDirs = (await getExternalStorageDirectories()) as List<Directory?>;
-        if (externalDirs.isNotEmpty && externalDirs[0] != null) {
-          externalDir = externalDirs[0];
-          
-          // Android/data/패키지명 부분을 제거하고 Documents 폴더로 이동
-          String path = externalDir!.path;  // null이 아님을 확신할 때는 ! 사용
-          final List<String> pathSegments = path.split('/');
-          final int androidIndex = pathSegments.indexOf('Android');
-          
-          if (androidIndex != -1) {
-            // Android 폴더 이전까지의 경로 + Documents
-            final String basePath = pathSegments.sublist(0, androidIndex).join('/');
-            final documentsPath = '$basePath/Documents';
-            
-            final documentsDir = Directory(documentsPath);
-            // 디렉토리가 없으면 생성
-            if (!await documentsDir.exists()) {
-              await documentsDir.create(recursive: true);
-            }
-            
-            return documentsPath;
-          }
-        }
-        
-        // 대체 방법: 환경 변수에서 외부 저장소 경로 가져오기
-        final String? externalStoragePath = Platform.environment['EXTERNAL_STORAGE'];
-        if (externalStoragePath != null) {
-          final documentsPath = '$externalStoragePath/Documents';
-          final documentsDir = Directory(documentsPath);
-          if (!await documentsDir.exists()) {
-            await documentsDir.create(recursive: true);
-          }
-          print('환경 변수 외부 저장소 경로: $documentsPath');
-          return documentsPath;
-        }
+        final deviceInfo = DeviceInfoPlugin();
+        final androidInfo = await deviceInfo.androidInfo;
+        _androidSdkVersion = androidInfo.version.sdkInt;
+        print('안드로이드 SDK 버전: $_androidSdkVersion');
+        return _androidSdkVersion!;
       } catch (e) {
-        print('외부 저장소 경로 가져오기 오류: $e');
+        print('기기 정보 가져오기 실패: $e');
+        // 플러그인 오류 발생 시 기본값 반환 (Android 10 기준)
+        _androidSdkVersion = 31;
+        return _androidSdkVersion!;
       }
     }
-    
-    // 기본 문서 디렉토리 사용
-    final directory = await getApplicationDocumentsDirectory();
-    print('기본 문서 디렉토리 사용: ${directory.path}');
-    return directory.path;
+    return 0; // 안드로이드가 아닌 경우
   }
-  
-  Future<File> _getLogFile() async {
-    final documentsPath = await _documentsPath;
-    final now = DateTime.now();
-    final formatter = DateFormat('yyyy-MM-dd');
-    final fileName = 'gps_log_${formatter.format(now)}.txt';
-    
-    // 로그 폴더 생성
-    final logDir = Directory('$documentsPath/gps_logs');
-    if (!await logDir.exists()) {
-      await logDir.create(recursive: true);
+
+  // 저장소 권한 확인 및 요청
+  Future<bool> checkStoragePermission() async {
+    try {
+      if (Platform.isAndroid) {
+        final sdkVersion = await androidSdkVersion;
+        
+        if (sdkVersion >= 33) { // Android 13 이상
+          final status = await Permission.photos.status;
+          if (status.isDenied) {
+            final result = await Permission.photos.request();
+            return result.isGranted;
+          }
+          return status.isGranted;
+        } else if (sdkVersion >= 30) { // Android 11, 12
+          final status = await Permission.manageExternalStorage.status;
+          if (status.isDenied) {
+            final result = await Permission.manageExternalStorage.request();
+            return result.isGranted;
+          }
+          return status.isGranted;
+        } else { // Android 10 이하
+          final status = await Permission.storage.status;
+          if (status.isDenied) {
+            final result = await Permission.storage.request();
+            return result.isGranted;
+          }
+          return status.isGranted;
+        }
+      } else if (Platform.isIOS) {
+        return true; // iOS는 별도 권한 필요 없음
+      }
+      return false;
+    } catch (e) {
+      print('권한 확인 중 오류 발생: $e');
+      return false;
     }
-    
-    return File('${logDir.path}/$fileName');
+  }
+
+  // 로그 파일 가져오기
+  Future<File> _getLogFile() async {
+    try {
+      Directory? directory;
+      
+      if (Platform.isAndroid) {
+        // 안드로이드 버전에 따라 적절한 저장소 경로 선택
+        final sdkVersion = await androidSdkVersion;
+        
+        if (sdkVersion >= 30) { // Android 11 이상
+          // 공용 문서 디렉토리 사용
+          directory = Directory('/storage/emulated/0/Documents');
+          // 디렉토리 존재 확인
+          if (!await directory.exists()) {
+            await directory.create(recursive: true);
+          }
+        } else {
+          // Android 10 이하는 기존 방식 사용
+          directory = await getExternalStorageDirectory();
+        }
+      } else if (Platform.isIOS) {
+        directory = await getApplicationDocumentsDirectory();
+      } else {
+        throw UnsupportedError('지원되지 않는 플랫폼입니다.');
+      }
+      
+      if (directory == null) {
+        throw Exception('디렉토리를 찾을 수 없습니다.');
+      }
+      
+      // 로그 디렉토리 생성
+      final logDir = Directory('${directory.path}/gps_log');
+      if (!await logDir.exists()) {
+        await logDir.create(recursive: true);
+      }
+      
+      // 오늘 날짜로 파일명 생성
+      final now = DateTime.now();
+      final fileName = 'gps_log_${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}.txt';
+      
+      return File('${logDir.path}/$fileName');
+    } catch (e) {
+      print('로그 파일 생성 중 오류 발생: $e');
+      rethrow;
+    }
   }
   
   Future<void> logGpsData({
@@ -132,9 +144,13 @@ class LogService {
         
       final file = await _getLogFile();
       
+      // 파일 존재 여부 확인 및 디버깅
+      bool fileExists = await file.exists();
+      print('파일 존재 여부: $fileExists');
+      
       // JSON 형식으로 로그 데이터 구성
       final Map<String, dynamic> logData = {
-        'Time': position.timestamp.toString().substring(0, 19),
+        'Time': position.timestamp.add(const Duration(hours: 9)).toString().substring(0, 19),
         'Latitude': position.latitude.toStringAsFixed(6),
         'Longitude': position.longitude.toStringAsFixed(6),
         'Inside': isInside ? "1" : "0", // 1 : 내부, 0 : 외부
@@ -149,9 +165,18 @@ class LogService {
       };
 
       String jsonLog = json.encode(logData);
-      await file.writeAsString('$jsonLog\n', mode: FileMode.append);
       
-      print('GPS 로그가 저장되었습니다: ${file.path}');
+      // 파일 쓰기 시도
+      try {
+        await file.writeAsString('$jsonLog\n', mode: FileMode.append);
+        print('GPS 로그가 저장되었습니다: ${file.path}');
+      } catch (e) {
+        print('파일 쓰기 오류: $e');
+        // 대체 방법으로 시도
+        final bytes = utf8.encode('$jsonLog\n');
+        await file.writeAsBytes(bytes, mode: FileMode.append);
+        print('바이트 방식으로 GPS 로그가 저장되었습니다.');
+      }
     } catch (e) {
       print('GPS 로그 저장 중 오류 발생: $e');
       print('오류 상세: ${e.toString()}');
