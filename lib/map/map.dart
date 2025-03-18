@@ -9,11 +9,11 @@ class MapView extends StatefulWidget {
   final List<Map<String, double>> areaPoints;
 
   const MapView({
-    Key? key,
+    super.key,
     required this.currentPosition,
     required this.isInside,
     required this.areaPoints,
-  }) : super(key: key);
+  });
 
   @override
   State<MapView> createState() => _MapViewState();
@@ -25,7 +25,8 @@ class _MapViewState extends State<MapView> {
   final Set<Marker> _markers = {};
   bool _mapInitialized = false;
   DateTime? _lastMapMovement;
-  bool _isAutoReturnEnabled = true;
+  final bool _isAutoReturnEnabled = true;
+  bool _userMovedMap = false; // 사용자가 지도를 직접 움직였는지 추적
   
   @override
   void initState() {
@@ -37,11 +38,18 @@ class _MapViewState extends State<MapView> {
   void _startAutoReturnTimer() {
     Future.delayed(const Duration(seconds: 1), () {
       if (mounted) {
-        if (_lastMapMovement != null && 
-            DateTime.now().difference(_lastMapMovement!).inSeconds >= 3 &&
-            _isAutoReturnEnabled &&
-            widget.currentPosition != null) {
-          _returnToUserLocation();
+        if (_isAutoReturnEnabled && widget.currentPosition != null) {
+          // 사용자가 지도를 직접 움직인 경우에만 3초 타이머 적용
+          if (_userMovedMap) {
+            if (_lastMapMovement != null && 
+                DateTime.now().difference(_lastMapMovement!).inSeconds >= 3) {
+              _returnToUserLocation();
+              _userMovedMap = false; // 위치 복귀 후 상태 초기화
+            }
+          } else {
+            // 사용자가 지도를 움직이지 않았다면 위치 변경 시 자동 추적
+            _returnToUserLocation();
+          }
         }
         _startAutoReturnTimer(); // 재귀적으로 타이머 계속 실행
       }
@@ -56,7 +64,7 @@ class _MapViewState extends State<MapView> {
             widget.currentPosition!.latitude,
             widget.currentPosition!.longitude,
           ),
-          zoom:17.0,
+          zoom:18.0,
         )),
       );
     }
@@ -66,6 +74,7 @@ class _MapViewState extends State<MapView> {
   void _updateLastMovementTime() {
     setState(() {
       _lastMapMovement = DateTime.now();
+      _userMovedMap = true; // 사용자가 지도를 직접 움직였음을 표시
     });
   }
   
@@ -76,6 +85,11 @@ class _MapViewState extends State<MapView> {
     // 위치 정보가 변경된 경우에만 마커 업데이트
     if (widget.currentPosition != oldWidget.currentPosition) {
       _updateMarkerOnly();
+      
+      // 사용자가 지도를 직접 움직이지 않았다면 위치 변경 시 자동으로 따라가기
+      if (!_userMovedMap && _controller != null) {
+        _returnToUserLocation();
+      }
     }
     
     // 내부/외부 상태가 변경된 경우에만 마커 색상 업데이트
@@ -211,18 +225,24 @@ class _MapViewState extends State<MapView> {
           widget.currentPosition!.latitude,
           widget.currentPosition!.longitude,
         ),
-        zoom: 17.0,
+        zoom: 18.0,
       ),
       markers: _markers,
       polygons: _polygons,
       myLocationEnabled: true,
       myLocationButtonEnabled: true,
-      mapType: MapType.normal,
+      mapType: MapType.satellite, // satellite 대신 hybrid로 변경
       onMapCreated: (GoogleMapController controller) {
         _controller = controller;
         if (!_mapInitialized) {
           _initializeMapData();
         }
+        // 맵 스타일 강제 적용
+        Future.delayed(const Duration(milliseconds: 200), () {
+          if (_controller != null && mounted) {
+            setState(() {}); // 맵 리렌더링 강제
+          }
+        });
       },
       onCameraMove: (_) {
         _updateLastMovementTime();

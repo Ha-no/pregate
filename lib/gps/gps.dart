@@ -148,7 +148,7 @@ class GPSService {
         return boundary['time']!.toInt();
       }
     }
-    return 3600000;
+    return 1800000;
   }
 
   bool _isPointInPolygon(double lat, double lng) {
@@ -167,10 +167,9 @@ class GPSService {
   }
 }
 
-// 상수 정의
 const Map<String, double> standardPoint = {
-  'lat': 35.107770,
-  'lng': 129.078880,
+  'lat': 35.105800,
+  'lng': 129.084600,
 };
 
 const List<Map<String, double>> areaPoint = [
@@ -181,8 +180,8 @@ const List<Map<String, double>> areaPoint = [
 ];
 
 const List<Map<String, double>> boundaryDistances = [
-  {'distance': 200, 'time': 1000},
-  {'distance': 3000, 'time': 60000},
-  {'distance': 20000, 'time': 600000},
-  {'distance': 50000, 'time': 1800000},
+  {'distance': 1000, 'time': 1000},     // 1km - 1초
+  {'distance': 5000, 'time': 60000},    // 5km - 1분
+  {'distance': 15000, 'time': 600000},  // 15km - 10분 
+                                        // 그외, 30분
 ];
