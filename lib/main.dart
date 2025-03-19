@@ -6,7 +6,7 @@ import 'gps/gps.dart';
 import 'utils/utils.dart';
 import 'log/log.dart';
 import 'map/map.dart';
-
+import 'log/testerlog.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
@@ -44,6 +44,7 @@ class _MyHomePageState extends State<MyHomePage> {
   late final Permission permission;
   late final GPSService gpsService;
   late final LogService logService;
+  late final TesterLogService testerLogService;
 
   Position? _currentPosition; // 현재 위치 정보
   bool _isInside = false;     // 내부 진입 확인
@@ -59,6 +60,12 @@ class _MyHomePageState extends State<MyHomePage> {
     
     // 로그 서비스 초기화
     logService = LogService();
+    testerLogService = TesterLogService();
+    
+    // 테스트 로그 서비스 상태 변경 리스너 추가
+    testerLogService.addStateListener(() {
+      setState(() {}); // UI 업데이트
+    });
     
     // GPS 서비스 초기화
     gpsService = GPSService(
@@ -91,6 +98,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void dispose() {
     gpsService.dispose();
+    testerLogService.dispose(); // 테스트 로그 서비스 리소스 해제
     super.dispose();
   }
 
@@ -155,7 +163,47 @@ class _MyHomePageState extends State<MyHomePage> {
                   ElevatedButton(
                     onPressed: gpsService.getCurrentPosition,
                     child: const Text('GPS 수동 업데이트'),
-                  ),                  
+                  ),
+                  const SizedBox(height: 20),
+                                    Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ElevatedButton(
+                        onPressed: () {
+                          print("로깅 시작 버튼 클릭: 현재 상태 ${testerLogService.isLogging}");
+                          testerLogService.startLogging();
+                          setState(() {}); // 강제 UI 업데이트 추가
+                          print("로깅 시작 후 상태: ${testerLogService.isLogging}");
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                        ),
+                        child: const Text('테스트 로깅 ON'),
+                      ),
+                      const SizedBox(width: 10),
+                      ElevatedButton(
+                        onPressed: () {
+                          print("로깅 중지 버튼 클릭: 현재 상태 ${testerLogService.isLogging}");
+                          testerLogService.stopLogging();
+                          setState(() {}); // 강제 UI 업데이트 추가
+                          print("로깅 중지 후 상태: ${testerLogService.isLogging}");
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+                        child: const Text('테스트 로깅 OFF'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  // 테스트 로깅 상태 표시
+                  Text(
+                    '테스트 로깅 상태: ${testerLogService.isLogging ? "ON" : "OFF"}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: testerLogService.isLogging ? Colors.green : Colors.red,
+                    ),
+                  ),
                 ],
               ),
             ),
