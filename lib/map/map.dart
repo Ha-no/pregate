@@ -27,6 +27,7 @@ class _MapViewState extends State<MapView> {
   DateTime? _lastMapMovement;
   final bool _isAutoReturnEnabled = true;
   bool _userMovedMap = false; // 사용자가 지도를 직접 움직였는지 추적
+  MapType _currentMapType = MapType.satellite; // 현재 맵 타입 상태 추가
   
   @override
   void initState() {
@@ -64,7 +65,7 @@ class _MapViewState extends State<MapView> {
             widget.currentPosition!.latitude,
             widget.currentPosition!.longitude,
           ),
-          zoom:18.0,
+          zoom:17.0,
         )),
       );
     }
@@ -212,6 +213,15 @@ class _MapViewState extends State<MapView> {
     
     setState(() {});
   }
+  
+  // 맵 타입 토글 함수 추가
+  void _toggleMapType() {
+    setState(() {
+      _currentMapType = _currentMapType == MapType.satellite 
+          ? MapType.normal 
+          : MapType.satellite;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -219,38 +229,58 @@ class _MapViewState extends State<MapView> {
       return const Center(child: CircularProgressIndicator());
     }
     
-    return GoogleMap(
-      initialCameraPosition: CameraPosition(
-        target: LatLng(
-          widget.currentPosition!.latitude,
-          widget.currentPosition!.longitude,
+    return Stack(
+      children: [
+        GoogleMap(
+          initialCameraPosition: CameraPosition(
+            target: LatLng(
+              widget.currentPosition!.latitude,
+              widget.currentPosition!.longitude,
+            ),
+            zoom: 17.0,
+          ),
+          markers: _markers,
+          polygons: _polygons,
+          myLocationEnabled: true,
+          myLocationButtonEnabled: true,
+          mapType: _currentMapType, // 동적 맵 타입 적용
+          onMapCreated: (GoogleMapController controller) {
+            _controller = controller;
+            if (!_mapInitialized) {
+              _initializeMapData();
+            }
+            // 맵 스타일 강제 적용
+            Future.delayed(const Duration(milliseconds: 200), () {
+              if (_controller != null && mounted) {
+                setState(() {}); // 맵 리렌더링 강제
+              }
+            });
+          },
+          onCameraMove: (_) {
+            _updateLastMovementTime();
+          },
+          onCameraIdle: () {
+            // 카메라 이동이 멈추면 마지막 이동 시간 업데이트
+            _updateLastMovementTime();
+          },
         ),
-        zoom: 18.0,
-      ),
-      markers: _markers,
-      polygons: _polygons,
-      myLocationEnabled: true,
-      myLocationButtonEnabled: true,
-      mapType: MapType.satellite, // satellite 대신 hybrid로 변경
-      onMapCreated: (GoogleMapController controller) {
-        _controller = controller;
-        if (!_mapInitialized) {
-          _initializeMapData();
-        }
-        // 맵 스타일 강제 적용
-        Future.delayed(const Duration(milliseconds: 200), () {
-          if (_controller != null && mounted) {
-            setState(() {}); // 맵 리렌더링 강제
-          }
-        });
-      },
-      onCameraMove: (_) {
-        _updateLastMovementTime();
-      },
-      onCameraIdle: () {
-        // 카메라 이동이 멈추면 마지막 이동 시간 업데이트
-        _updateLastMovementTime();
-      },
+        // 맵 타입 토글 버튼 추가
+        Positioned(
+          top: 16,
+          left: 16,
+          child: FloatingActionButton(
+            mini: true,
+            backgroundColor: Colors.white,
+            onPressed: _toggleMapType,
+            child: Icon(
+              _currentMapType == MapType.satellite 
+                  ? Icons.map 
+                  : Icons.satellite,
+              color: Colors.black87,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -116,15 +116,20 @@ class TesterLogService {
       // 로그 디렉토리 생성
       final logDir = Directory('${directory.path}/gps_log');
       if (!await logDir.exists()) {
-        _logCount = 1;
         await logDir.create(recursive: true);
       }
       
       // 오늘 날짜로 파일명 생성
       final now = DateTime.now();
       final fileName = 'Tester_gps_log_${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}.txt';
+
+      final file = File('${logDir.path}/$fileName');
+
+      if (!await file.exists()) {
+        _logCount = 1;
+      }
       
-      return File('${logDir.path}/$fileName');
+      return file;
     } catch (e) {
       print('테스트 로그 파일 생성 중 오류 발생: $e');
       rethrow;

@@ -6,7 +6,8 @@ import 'gps/gps.dart';
 import 'utils/utils.dart';
 import 'log/log.dart';
 import 'map/map.dart';
-import 'log/testerlog.dart';
+import 'tester/testerlog.dart';
+import 'tester/testeralram.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
@@ -28,7 +29,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// 앱 관련 변수
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
 
@@ -38,19 +38,18 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-// 동작 관련 변수
 class _MyHomePageState extends State<MyHomePage> {
-  // Import 모듈
   late final Permission permission;
   late final GPSService gpsService;
   late final LogService logService;
   late final TesterLogService testerLogService;
+  late final TesterAlarmService testerAlarmService;
 
-  Position? _currentPosition; // 현재 위치 정보
-  bool _isInside = false;     // 내부 진입 확인
-  double distance = -1;        // 현재 위치와 표준 지점 사이의 거리 
-  DateTime? _lastUpdateTime;  // 마지막 위치 업데이트 시간
-  int _getGpsTime = 1000;     // 초기 GPS 업데이트 주기 (1초)
+  Position? _currentPosition;
+  bool _isInside = false;
+  double distance = -1;
+  DateTime? _lastUpdateTime;
+  int _getGpsTime = 1000;
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
@@ -58,16 +57,18 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     
-    // 로그 서비스 초기화
     logService = LogService();
     testerLogService = TesterLogService();
     
-    // 테스트 로그 서비스 상태 변경 리스너 추가
     testerLogService.addStateListener(() {
-      setState(() {}); // UI 업데이트
+      setState(() {});
     });
+
+    testerAlarmService = TesterAlarmService(
+      flutterLocalNotificationsPlugin: FlutterLocalNotificationsPlugin(),
+    );
+    testerAlarmService.initialize();
     
-    // GPS 서비스 초기화
     gpsService = GPSService(
       onPositionChanged: (position) {
         setState(() => _currentPosition = position);
@@ -98,7 +99,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void dispose() {
     gpsService.dispose();
-    testerLogService.dispose(); // 테스트 로그 서비스 리소스 해제
+    testerLogService.dispose();
     super.dispose();
   }
 
@@ -111,7 +112,6 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
       body: Column(
         children: <Widget>[
-          // 맵 뷰 추가 (화면 상단에 1/3 크기로)
           SizedBox(
             height: MediaQuery.of(context).size.height * 0.33,
             width: double.infinity,
@@ -123,7 +123,6 @@ class _MyHomePageState extends State<MyHomePage> {
                   )
                 : const Center(child: CircularProgressIndicator()),
           ),
-          // 기존 내용을 Expanded로 감싸서 나머지 공간 차지하도록 함
           Expanded(
             child: Center(
               child: Column(
@@ -154,26 +153,39 @@ class _MyHomePageState extends State<MyHomePage> {
                   // )),
                   // const SizedBox(height: 20),
                   Text('정보 수집 시간 : ${_lastUpdateTime?.toString().substring(11, 19) ?? "없음"}'),
-                  Text('기준점과의 거리 : ${distance.toStringAsFixed(1)}m'),
+                  Text('기준점과의 거리 : ${(distance/1000).toStringAsFixed(1)} km'),
                   Text('GPS 정보 수집 주기 : '
                       '${(_getGpsTime / 3600000).toInt()}h : '
                       '${((_getGpsTime % 3600000) / 60000).toInt()}m : '
                       '${(((_getGpsTime % 3600000) % 60000) / 1000).toInt()}s'),
                   const SizedBox(height: 10),
-                  ElevatedButton(
-                    onPressed: gpsService.getCurrentPosition,
-                    child: const Text('GPS 수동 업데이트'),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                        ElevatedButton(
+                          onPressed: () {
+                            testerAlarmService.showTestNotification();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                          ),
+                          child: const Text('푸시 알림 테스트'),
+                        ),
+                        const SizedBox(width: 10),
+                        ElevatedButton(
+                          onPressed: gpsService.getCurrentPosition,
+                          child: const Text('GPS 수동 업데이트'),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 20),
-                                    Row(
+                  Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       ElevatedButton(
                         onPressed: () {
-                          print("로깅 시작 버튼 클릭: 현재 상태 ${testerLogService.isLogging}");
                           testerLogService.startLogging();
-                          setState(() {}); // 강제 UI 업데이트 추가
-                          print("로깅 시작 후 상태: ${testerLogService.isLogging}");
+                          setState(() {});
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green,
@@ -183,10 +195,8 @@ class _MyHomePageState extends State<MyHomePage> {
                       const SizedBox(width: 10),
                       ElevatedButton(
                         onPressed: () {
-                          print("로깅 중지 버튼 클릭: 현재 상태 ${testerLogService.isLogging}");
                           testerLogService.stopLogging();
-                          setState(() {}); // 강제 UI 업데이트 추가
-                          print("로깅 중지 후 상태: ${testerLogService.isLogging}");
+                          setState(() {});
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red,
@@ -196,7 +206,6 @@ class _MyHomePageState extends State<MyHomePage> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  // 테스트 로깅 상태 표시
                   Text(
                     '테스트 로깅 상태: ${testerLogService.isLogging ? "ON" : "OFF"}',
                     style: TextStyle(

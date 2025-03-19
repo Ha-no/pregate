@@ -100,7 +100,7 @@ class GPSService {
 
     // 현재 위치 업데이트
     currentPosition = position;
-    lastUpdateTime = position.timestamp;
+    lastUpdateTime = position.timestamp.add(const Duration(hours: 9));
 
     // 거리 계산 (한 번만 실행)
     distance = _calculateDistance(
@@ -186,8 +186,8 @@ const List<Map<String, double>> areaPoint = [
 
 const List<Map<String, double>> boundaryDistances = [
   {'distance': 1000, 'time': 1000},     // 1km - 1초
-  // {'distance': 5000, 'time': 60000},    // 5km - 1분
-  {'distance': 10000, 'time': 60000},    // 10km - 1분 *테스트용
+  {'distance': 5000, 'time': 60000},    // 5km - 1분
+  // {'distance': 10000, 'time': 60000},    // 10km - 1분 *테스트용
   {'distance': 15000, 'time': 600000},  // 15km - 10분 
                                         // 그외, 30분
 ];
