@@ -178,14 +178,17 @@ class TesterLogService {
         
         // 로그 데이터 구성
         final Map<String, dynamic> logData = {
-          'Time': DateTime.now().toString().substring(0, 23),
-          'Latitude': position.latitude.toStringAsFixed(6),
-          'Longitude': position.longitude.toStringAsFixed(6),
-          'Accuracy': position.accuracy.toStringAsFixed(1),
-          'Altitude': position.altitude.toStringAsFixed(1),
-          'Speed': position.speed.toStringAsFixed(2),
-          'Heading': position.heading.toStringAsFixed(2),
-        };
+        'Time': position.timestamp.add(const Duration(hours: 9)).toString().substring(0, 19),
+        'Latitude': position.latitude.toStringAsFixed(6),
+        'Longitude': position.longitude.toStringAsFixed(6),
+        'accuracy': position.accuracy,
+        'altitude': position.altitude,
+        'altitudeAccuracy': position.altitudeAccuracy,
+        'heading': position.heading.toStringAsFixed(2),
+        'headingAccuracy': position.headingAccuracy,
+        'speed': position.speed.toStringAsFixed(2),
+        'speedAccuracy': position.speedAccuracy,
+      };
         
         String jsonLog = json.encode(logData);
         

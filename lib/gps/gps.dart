@@ -1,7 +1,6 @@
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
 import 'dart:math';
-import 'dart:io';
 import '../utils/utils.dart';
 
 class GPSService {
@@ -16,8 +15,6 @@ class GPSService {
   final Function(double) onDistanceChanged;
   final Function(DateTime?) onTimeChanged;
   final Function(int) onIntervalChanged;
-  StreamSubscription<Position>? positionStream;
-  
 
   GPSService({
     required this.onPositionChanged,
@@ -32,38 +29,17 @@ class GPSService {
     if (!serviceEnabled) {
       throw Exception('위치 서비스가 비활성화되어 있습니다.');
     }
+   
 
-    // 기존 스트림과 타이머 취소
-    await positionStream?.cancel();
+    // 기존 타이머 취소
     locationTimer?.cancel();
 
-    // Android 12 호환 위치 설정
-    LocationSettings locationSettings;
-    if (Platform.isAndroid) {
-      locationSettings = AndroidSettings(
-        accuracy: LocationAccuracy.high,
-        intervalDuration: Duration(milliseconds: getGpsTime),
-        // Android 12에서는 포그라운드 서비스 알림 설정 필요
-        foregroundNotificationConfig: const ForegroundNotificationConfig(
-          notificationTitle: '위치 추적 중',
-          notificationText: '앱이 백그라운드에서 위치를 추적하고 있습니다.',
-          enableWakeLock: true,
-        ),
-      );
-    } else {
-      locationSettings = const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 0,
-      );
-    }
-
-    // 위치 스트림 설정
-    positionStream = Geolocator.getPositionStream(
-      locationSettings: locationSettings,
-    ).listen((Position position) {
-      _handlePosition(position);
+    // Timer를 사용하여 주기적으로 위치 업데이트
+    locationTimer = Timer.periodic(Duration(milliseconds: getGpsTime), (timer) {
+      getCurrentPosition();
     });
 
+    // 초기 위치 가져오기
     getCurrentPosition();
   }
 
@@ -87,7 +63,6 @@ class GPSService {
         speedAccuracy: position.speedAccuracy,
       );
 
-      // 위치 정보 처리는 _handlePosition 메서드로 통합
       _handlePosition(updatedPosition);
     } catch (e) {
       print('위치 획득 실패: $e');
@@ -102,7 +77,7 @@ class GPSService {
     currentPosition = position;
     lastUpdateTime = position.timestamp.add(const Duration(hours: 9));
 
-    // 거리 계산 (한 번만 실행)
+    // 거리 계산
     distance = _calculateDistance(
       position.latitude,
       position.longitude,
@@ -110,7 +85,7 @@ class GPSService {
       standardPoint['lng']!,
     );
 
-    // 내부 영역 계산 (한 번만 실행)
+    // 내부 영역 계산
     bool isCurrentlyInside = _isPointInPolygon(
       position.latitude,
       position.longitude,
@@ -119,23 +94,27 @@ class GPSService {
     // 영역 진입 알림 처리
     if (isCurrentlyInside && !isInside) {
       NotificationUtils.showNotification(
-        title: '영역 진입 알림', 
+        title: '영역 진입 알림',
         body: '지정된 영역에 진입했습니다. 현재 시간: ${lastUpdateTime?.toString().substring(11, 19)}',
       );
     }
     
     isInside = isCurrentlyInside;
     
-    // 업데이트 주기 계산 및 변경 (필요한 경우에만 스트림 재시작)
+    // 업데이트 주기 계산 및 변경
     int newGpsTime = _calculateUpdateInterval(distance);
     if (newGpsTime != getGpsTime) {
       getGpsTime = newGpsTime;
       onIntervalChanged(newGpsTime);
-      // 비동기 실행으로 변경하여 현재 메서드 완료 후 실행되도록 함
-      Future.microtask(() => startLocationTracking());
+      
+      // Timer 재설정
+      locationTimer?.cancel();
+      locationTimer = Timer.periodic(Duration(milliseconds: getGpsTime), (timer) {
+        getCurrentPosition();
+      });
     }
     
-    // 상태 업데이트는 마지막에 한 번만 실행
+    // 상태 업데이트
     onPositionChanged(position);
     onInsideChanged(isInside);
     onDistanceChanged(distance);
@@ -167,27 +146,47 @@ class GPSService {
   }
 
   void dispose() {
-    positionStream?.cancel();
     locationTimer?.cancel();
   }
 }
 
 const Map<String, double> standardPoint = {
-  'lat': 35.105800,
-  'lng': 129.084600,
+  'lat': 35.1076275,
+  'lng': 129.0803245,
 };
+
+// Test 용
+// const Map<String, double> standardPoint = {
+//   'lat': 35.174575,
+//   'lng': 129.1282395,
+// };
 
 const List<Map<String, double>> areaPoint = [
   {'lat': 35.107760, 'lng': 129.079370},
-  {'lat': 35.107751, 'lng': 129.081279},
-  {'lat': 35.107495, 'lng': 129.079374},
-  {'lat': 35.107479, 'lng': 129.081281},
+  {'lat': 35.107760, 'lng': 129.081279},
+  {'lat': 35.107495, 'lng': 129.079370},
+  {'lat': 35.107495, 'lng': 129.081279},
 ];
+
+// Test 용
+// const List<Map<String, double>> areaPoint = [
+//   {'lat': 35.174750, 'lng': 129.127879},
+//   {'lat': 35.174400, 'lng': 129.127879},
+//   {'lat': 35.174750, 'lng': 129.128600},
+//   {'lat': 35.174400, 'lng': 129.128600},
+// ];
 
 const List<Map<String, double>> boundaryDistances = [
   {'distance': 1000, 'time': 1000},     // 1km - 1초
   {'distance': 5000, 'time': 60000},    // 5km - 1분
-  // {'distance': 10000, 'time': 60000},    // 10km - 1분 *테스트용
   {'distance': 15000, 'time': 600000},  // 15km - 10분 
                                         // 그외, 30분
 ];
+
+// Test 용
+// const List<Map<String, double>> boundaryDistances = [
+//   {'distance': 100, 'time': 1000},   // 100m - 1초
+//   {'distance': 150, 'time': 60000},   // 150m - 1분
+//   {'distance': 200, 'time': 120000},   // 200m - 15초 
+//   {'distance': 500, 'time': 180000},   // 200m - 15초 
+// ];

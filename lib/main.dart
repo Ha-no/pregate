@@ -8,6 +8,7 @@ import 'log/log.dart';
 import 'map/map.dart';
 import 'tester/testerlog.dart';
 import 'tester/testeralram.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
